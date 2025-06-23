@@ -2,19 +2,16 @@ import argparse
 import json
 import subprocess
 import csv
-from datetime import datetime
 
 def get_all_projects(org_id):
-    print(f"Fetching all projects under org {org_id}...")
     cmd = [
         "gcloud", "projects", "list",
-        f"--filter=parent.id={org_id}",
-        "--format=value(projectId)"
+        f"--filter=parent.type=organization AND parent.id={org_id}",
+        "--format=json"
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    project_ids = result.stdout.strip().splitlines()
-    print(f"Found {len(project_ids)} projects.")
-    return project_ids
+    projects = json.loads(result.stdout)
+    return [p["projectId"] for p in projects]
 
 def get_iam_policy(project_id):
     cmd = ["gcloud", "projects", "get-iam-policy", project_id, "--format=json"]
@@ -22,19 +19,21 @@ def get_iam_policy(project_id):
     return json.loads(result.stdout)
 
 def is_overprivileged(role):
-    return role in ["roles/editor", "roles/owner", "roles/viewer"]
+    return role in ["roles/editor", "roles/owner", "roles/iam.serviceAccountUser"]
 
 def audit_project(project_id):
-    policy = get_iam_policy(project_id)
-    results = []
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    try:
+        policy = get_iam_policy(project_id)
+    except subprocess.CalledProcessError:
+        print(f"⚠️ Skipping {project_id}: unable to fetch IAM policy.")
+        return []
 
+    results = []
     for binding in policy.get("bindings", []):
         role = binding["role"]
         if is_overprivileged(role):
             for member in binding["members"]:
                 results.append({
-                    "timestamp": timestamp,
                     "project_id": project_id,
                     "principal": member,
                     "role": role,
@@ -42,31 +41,25 @@ def audit_project(project_id):
                 })
     return results
 
-def save_report(data, filename="gcp_org_iam_audit_report.csv"):
+def save_report(data, filename="org_iam_audit_report.csv"):
     with open(filename, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["timestamp", "project_id", "principal", "role", "recommendation"])
+        writer = csv.DictWriter(f, fieldnames=["project_id", "principal", "role", "recommendation"])
         writer.writeheader()
         writer.writerows(data)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--project", help="GCP project ID (optional)")
-    parser.add_argument("--org", help="GCP organization ID (to scan all projects)")
+    parser.add_argument("--org", required=True, help="GCP organization ID")
     args = parser.parse_args()
 
-    all_results = []
+    all_projects = get_all_projects(args.org)
+    print(f"Found {len(all_projects)} projects under org {args.org}")
 
-    if args.org:
-        project_ids = get_all_projects(args.org)
-        for pid in project_ids:
-            print(f"Auditing project: {pid}")
-            results = audit_project(pid)
-            all_results.extend(results)
-    elif args.project:
-        results = audit_project(args.project)
-        all_results = results
-    else:
-        parser.error("You must provide either --project or --org")
+    all_audit_data = []
+    for pid in all_projects:
+        print(f"Auditing project: {pid}")
+        audit_data = audit_project(pid)
+        all_audit_data.extend(audit_data)
 
-    save_report(all_results)
-    print("Audit complete. Report saved to gcp_org_iam_audit_report.csv")
+    save_report(all_audit_data)
+    print(f"✅ Audit complete. Report saved to org_iam_audit_report.csv")
