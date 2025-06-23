@@ -1,6 +1,6 @@
-# 🔐 GCP IAM Over-Privileged Account Detection
+# 🔐 GCP ORG IAM Over-Privileged Account Detection
 
-This tool identifies users and service accounts with **overly permissive IAM roles** across Google Cloud Platform projects. It detects risky roles like `roles/owner`, `roles/editor`, and `roles/viewer` that violate the principle of least privilege, then generates an actionable audit report.
+This tool identifies users and service accounts with **overly permissive IAM roles** across Google Cloud Platform projects within an organization. It detects risky roles like `roles/owner`, `roles/editor`, and `roles/viewer` that violate the principle of least privilege, then generates an actionable audit report.
 
 Supports scanning a **single GCP project** or an **entire GCP organization**.
 
